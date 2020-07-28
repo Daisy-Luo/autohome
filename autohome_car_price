@@ -1,0 +1,119 @@
+# -*- coding: utf-8 -*-
+
+import requests
+from lxml import etree
+import pandas as pd
+import json
+import numpy
+import sys
+import logging
+import random
+
+class QCZJ:
+    def __init__(self):
+        self.auto_id = '42062'
+        self.MSRPUrl = 'http://www.autohome.com.cn/spec/%s/#pvareaid=101605'% (self.auto_id)
+        self.CityUrl = 'http://dealer.autohome.com.cn/frame/cms/GetProvinceCityList?SpecId=%s&SeriesId=0&roid1=2'% (self.auto_id)
+        self.user_agent = random.choice(['Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Safari/537.36'])
+        self.headers = {'User-Agent': self.user_agent, 'Referer': random.choice(['http://www.autohome.com.cn/', 'http://newcar.xcar.com.cn/'])}
+
+    def getPageCode(self, url):
+        maxTryNum = 20
+        for tries in range(maxTryNum):
+            try:
+                req = requests.get(url, headers=self.headers)
+                print(req.status_code)
+                if req.status_code == 200:
+                    html = req.content
+                    break
+                if req.status_code == 403:
+                    headers = {'User-Agent': self.user_agent,
+                               'Referer': 'http://newcar.xcar.com.cn/',
+                               'Host': "hm.baidu.com"}
+                    req = requests.get(url, headers=headers)
+                    if req.status_code == 200:
+                        html = req.content
+                        break
+            except:
+                if tries < (maxTryNum - 1):
+                    continue
+                else:
+                    logging.error("Has tried %d times to access url %s, all failed!", maxTryNum, url)
+                    break
+        return html
+
+    def getMSRP(self):
+        pageCode = self.getPageCode(self.MSRPUrl)
+        pageCode =  pageCode.decode('gbk')
+        tree = etree.HTML(pageCode)
+        price = tree.xpath("/html/body/div[1]/div[3]/div[4]/div[1]/div[1]/div[2]/div[2]/dl[2]/dd[1]/div[2]/span/text()")[0]
+        return float(price)*10000
+
+    def get_price_by_city(self):
+        result_list = []
+        list6 = []
+        list = []
+        list1 = []
+        list2 = []
+        list3 = []
+        list4 = []
+        list5 = []
+        list6 = []
+        list7 = []
+        result_list.append((u'Province', u'Price'))
+        result_list.append((u'MSRP',MSRP))
+        page = self.getPageCode(self.CityUrl)
+        city_list = json.loads(page.decode('gbk'))
+        for city_dict in city_list.get('result').get('list'):
+            c_id = city_dict.get('Id')
+            p_name = city_dict.get('Name')
+            cityUrl = "http://dealer.autohome.com.cn/frame/spec/%s/%s/0/0/1/1/5?isPage=0&seriesId=59&source=defalut&kindId=1&isPriceAuth=0" % (self.auto_id, c_id)
+            pageCode = self.getPageCode(cityUrl)
+            tree = etree.HTML(pageCode.decode('gbk'))
+            price1 = float(tree.xpath('.//*[@id="dealer-list"]/li[1]/dl[2]/dd/span/a/text()')[0].strip())
+            try:
+                price2 = float(tree.xpath('.//*[@id="dealer-list"]/li[2]/dl[2]/dd[1]/span/a/text()')[0].strip())
+            except:
+                price2 = 0
+            if (price2 - price1) < (0.1 * MSRP):
+                price = price1
+            else:
+                price = price2
+            result_list.append((p_name, float(price)*10000))
+            list6.append(float(price)*10000)
+        retail = numpy.min(list6)
+        for d in result_list:
+            if d[0] in [u'北京', u'天津', u'河北', u'内蒙古', u'山西']:
+                list1.append(d[1])
+            if d[0] in [u'广西', u'广东', u'湖北', u'海南', u'河南', u'湖南']:
+                list2.append(d[1])
+            if d[0] in ['重庆', u'四川', u'云南', u'贵州', u'西藏']:
+                list3.append(d[1])
+            if d[0] in ['黑龙江', u'吉林', u'辽宁']:
+                list4.append(d[1])
+            if d[0] in [u'山东', u'上海', u'江西', u'福建', u'安徽', u'江苏', u'浙江']:
+                list5.append(d[1])
+            if d[0] in [u'新疆', u'陕西', u'青海', u'甘肃', u'宁夏']:
+                list6.append(d[1])
+        list7.append((u'MSRP', MSRP))
+        list7.append((u'Retail', retail))
+        list7.append((u'Discount', (retail / MSRP) - 1))
+        list7.append((u'North', numpy.mean(list1)))
+        list7.append((u'North West', numpy.mean(list6)))
+        list7.append((u'North East', numpy.mean(list4)))
+        list7.append((u'East', numpy.mean(list5)))
+        list7.append((u'South Central', numpy.mean(list2)))
+        list7.append((u'South West', numpy.mean(list3)))
+        return list7
+
+    def start(self):
+        global MSRP
+        MSRP = self.getMSRP()
+        result_list = self.get_price_by_city()
+        df = pd.DataFrame(result_list, columns=['category', 'price'])
+        writer = pd.ExcelWriter('price.xlsx')
+        df.T.to_excel(writer, sheet_name= 'price', startrow= 1)
+        writer.save()
+
+spider = QCZJ()
+spider.start()
