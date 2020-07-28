@@ -1,2 +1,2 @@
 # autohome
-obtain car prices from autohome website
+obtain lowest car prices by regions from autohome website
